@@ -30,6 +30,7 @@ import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -431,7 +432,10 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
 
     private static void openCustomInventory(Inventory inventory, ServerPlayer player, MenuType<?> windowType) {
         if (player.connection == null) return;
-        Preconditions.checkArgument(windowType != null, "Unknown windowType");
+        if (!CraftContainer.isRegisteredMenuType(windowType)) {
+            Bukkit.getLogger().warning("Refusing to open an inventory with an unregistered menu type for " + player.getScoreboardName());
+            return;
+        }
         AbstractContainerMenu container = new CraftContainer(inventory, player, player.nextContainerCounterInt());
 
         // Paper start - Add titleOverride to InventoryOpenEvent
@@ -505,12 +509,17 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
     public void openInventory(InventoryView inventory) {
         Preconditions.checkArgument(this.equals(inventory.getPlayer()), "InventoryView must belong to the opening player");
         if (!(this.getHandle() instanceof ServerPlayer)) return; // TODO: NPC support?
-        if (((ServerPlayer) this.getHandle()).connection == null) return;
-        if (this.getHandle().containerMenu != this.getHandle().inventoryMenu) {
-            // fire INVENTORY_CLOSE if one already open
-            ((ServerPlayer) this.getHandle()).connection.handleContainerClose(new ServerboundContainerClosePacket(this.getHandle().containerMenu.containerId), org.bukkit.event.inventory.InventoryCloseEvent.Reason.OPEN_NEW); // Paper - Inventory close reason
-        }
         ServerPlayer player = (ServerPlayer) this.getHandle();
+        if (player.connection == null) return;
+        MenuType<?> windowType = CraftContainer.getNotchInventoryType(inventory.getTopInventory());
+        if (!CraftContainer.isRegisteredMenuType(windowType)) {
+            Bukkit.getLogger().warning("Refusing to open an inventory view with an unregistered menu type for " + player.getScoreboardName());
+            return;
+        }
+        if (player.containerMenu != player.inventoryMenu) {
+            // fire INVENTORY_CLOSE if one already open
+            player.connection.handleContainerClose(new ServerboundContainerClosePacket(player.containerMenu.containerId), org.bukkit.event.inventory.InventoryCloseEvent.Reason.OPEN_NEW); // Paper - Inventory close reason
+        }
         AbstractContainerMenu container;
         if (inventory instanceof CraftInventoryView) {
             container = ((CraftInventoryView) inventory).getHandle();
@@ -528,7 +537,6 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
         }
 
         // Now open the window
-        MenuType<?> windowType = CraftContainer.getNotchInventoryType(inventory.getTopInventory());
         //String title = inventory.getTitle(); // Paper - comment
         net.kyori.adventure.text.Component adventure$title = inventory.title(); // Paper
         if (adventure$title == null) adventure$title = ColorAPI.adventure(inventory.getTitle()); // Paper

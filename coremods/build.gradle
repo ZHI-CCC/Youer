@@ -23,7 +23,12 @@ dependencies {
     compileOnly "com.google.code.gson:gson"
 
     compileOnly "org.jetbrains:annotations:${project.jetbrains_annotations_version}"
-    compileOnly "com.mohistmc.fancymodloader:loader:${project.fancy_mod_loader_version}"
+    compileOnly("com.mohistmc.fancymodloader:loader:${project.fancy_mod_loader_version}") {
+        // Youer ships the version declared in gradle.properties; do not resolve
+        // FML's older transitive version just to compile these coremods.
+        exclude group: 'cpw.mods', module: 'modlauncher'
+    }
+    compileOnly "cpw.mods:modlauncher:${project.modlauncher_version}"
 }
 
 tasks.withType(JavaCompile).configureEach {

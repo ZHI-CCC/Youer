@@ -49,6 +49,7 @@ public class ClassLoaderRemapper extends LenientJarRemapper {
 
     private static final Logger LOGGER = LogManager.getLogger("Youer");
     private static final String PREFIX = "net/minecraft/";
+    private static final String MENU_TYPE = "net/minecraft/world/inventory/MenuType";
     private static final String REPLACED_NAME = Type.getInternalName(ReflectionHandler.class);
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private final JarMapping toBukkitMapping;
@@ -186,10 +187,41 @@ public class ClassLoaderRemapper extends LenientJarRemapper {
         return toBukkitRemapper.mapFieldName(owner, srgName, desc, -1);
     }
 
+    /**
+     * Older Bukkit plugins reflect the historical Containers constants. In
+     * 1.21.1 their MenuType names use a lowercase x and CRAFTER gained a suffix.
+     */
+    private static String normalizeLegacyMenuTypeFieldName(String internalName, String fieldName) {
+        if (!MENU_TYPE.equals(internalName)) {
+            return fieldName;
+        }
+
+        return switch (fieldName) {
+            case "GENERIC_3X3" -> "GENERIC_3x3";
+            case "GENERIC_9X1" -> "GENERIC_9x1";
+            case "GENERIC_9X2" -> "GENERIC_9x2";
+            case "GENERIC_9X3" -> "GENERIC_9x3";
+            case "GENERIC_9X4" -> "GENERIC_9x4";
+            case "GENERIC_9X5" -> "GENERIC_9x5";
+            case "GENERIC_9X6" -> "GENERIC_9x6";
+            case "CRAFTER", "CRAFTER_3X3" -> "CRAFTER_3x3";
+            default -> fieldName;
+        };
+    }
+
+    private Field findField(Class<?> cl, String internalName, String bukkitName) {
+        BiMap<Field, String> fields = getFields(cl, internalName);
+        Field field = fields.inverse().get(bukkitName);
+        if (field == null) {
+            field = fields.inverse().get(normalizeLegacyMenuTypeFieldName(internalName, bukkitName));
+        }
+        return field;
+    }
+
     public String tryMapDecFieldToSrg(Class<?> cl, String bukkitName) {
         String internalName = Type.getInternalName(cl);
         if (internalName.startsWith(PREFIX)) {
-            Field field = getFields(cl, internalName).inverse().get(bukkitName);
+            Field field = findField(cl, internalName, bukkitName);
             return field == null ? bukkitName : field.getName();
         } else return bukkitName;
     }
@@ -197,7 +229,7 @@ public class ClassLoaderRemapper extends LenientJarRemapper {
     public String tryMapFieldToSrg(Class<?> cl, String bukkitName) {
         String internalName = Type.getInternalName(cl);
         if (shouldRemap(internalName)) {
-            Field field = getFields(cl, internalName).inverse().get(bukkitName);
+            Field field = findField(cl, internalName, bukkitName);
             return field == null ? bukkitName : field.getName();
         } else return bukkitName;
     }

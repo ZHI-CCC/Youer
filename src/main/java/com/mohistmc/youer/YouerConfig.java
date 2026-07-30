@@ -104,16 +104,6 @@ public class YouerConfig {
     public static boolean watchdog_spigot;
     public static boolean watchdog_mohist;
     public static boolean pluginchannel_debug;
-    public static boolean deepseek_enable;
-    public static String deepseek_baseUrl;
-    public static String deepseek_apikey;
-    public static String deepseek_model;
-    public static int deepseek_max_tokens;
-    public static int deepseek_max_history;
-    public static String deepseek_system;
-    public static String deepseek_command;
-    public static String deepseek_all_command;
-    public static String deepseek_chatformat;
     public static boolean custom_no_villager;
     public static boolean custom_entity_tp_end;
     public static boolean custom_entity_tp_nether;
@@ -318,17 +308,6 @@ public class YouerConfig {
         permissions_debug_console = getBoolean("permissions.debug.console", false);
         permissions_send_player = getBoolean("permissions.debug.player", false);
         pluginchannel_debug = getBoolean("pluginchannel.debug", false);
-
-        deepseek_enable = getBoolean("deepseek.enable", false);
-        deepseek_baseUrl = getString("deepseek.baseUrl", "https://api.deepseek.com/chat/completions");
-        deepseek_apikey = getString("deepseek.apikey", "youer");
-        deepseek_model = getString("deepseek.model", "deepseek-v4-pro");
-        deepseek_max_tokens = getInt("deepseek.max_tokens", 2048);
-        deepseek_max_history = getInt("deepseek.max_history", 20);
-        deepseek_system = getString("deepseek.system", "你的名字叫小小墨，年龄18岁，是个可爱的女孩子!");
-        deepseek_command = getString("deepseek.command", "ai");
-        deepseek_all_command = getString("deepseek.all_command", "ai-all");
-        deepseek_chatformat = getString("deepseek.chatformat", "<小小墨> %s");
 
         custom_no_villager = getBoolean("custom.no_villager", false);
         custom_entity_tp_end = getBoolean("custom.entity_tp_end", true);

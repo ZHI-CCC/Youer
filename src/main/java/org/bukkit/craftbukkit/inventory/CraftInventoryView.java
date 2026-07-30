@@ -5,6 +5,7 @@ import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.MenuType;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.craftbukkit.entity.CraftHumanEntity;
 import org.bukkit.craftbukkit.util.CraftChatMessage;
@@ -118,6 +119,10 @@ public class CraftInventoryView<T extends AbstractContainerMenu, I extends Inven
         final ServerPlayer entityPlayer = (ServerPlayer) ((CraftHumanEntity) view.getPlayer()).getHandle();
         final int containerId = entityPlayer.containerMenu.containerId;
         final MenuType<?> windowType = CraftContainer.getNotchInventoryType(view.getTopInventory());
+        if (!CraftContainer.isRegisteredMenuType(windowType)) {
+            Bukkit.getLogger().warning("Refusing to update an inventory title with an unregistered menu type for " + entityPlayer.getScoreboardName());
+            return;
+        }
         entityPlayer.connection.send(new ClientboundOpenScreenPacket(containerId, windowType, CraftChatMessage.fromString(title)[0]));
         ((Player) view.getPlayer()).updateInventory();
     }

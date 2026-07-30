@@ -1,5 +1,6 @@
 package org.bukkit.craftbukkit.inventory;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -142,6 +143,10 @@ public class CraftContainer extends AbstractContainerMenu {
                     return ((CraftMenuType<?>) menu).getHandle();
                 }
         }
+    }
+
+    public static boolean isRegisteredMenuType(MenuType<?> menuType) {
+        return menuType != null && BuiltInRegistries.MENU.getId(menuType) >= 0;
     }
 
     private void setupSlots(Container top, net.minecraft.world.entity.player.Inventory bottom, Player entityhuman) {

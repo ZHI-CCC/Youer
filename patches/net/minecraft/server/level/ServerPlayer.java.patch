@@ -907,6 +907,11 @@
  
                  return OptionalInt.empty();
              } else {
++                var menuType = abstractcontainermenu.getType();
++                if (menuType == null || net.minecraft.core.registries.BuiltInRegistries.MENU.getId(menuType) < 0) {
++                    LOGGER.warn("Refusing to open an unregistered menu type {} for {} from {}", menuType, this.getScoreboardName(), p_9033_.getClass().getName());
++                    return OptionalInt.empty();
++                }
 -                this.connection
 -                    .send(new ClientboundOpenScreenPacket(abstractcontainermenu.containerId, abstractcontainermenu.getType(), p_9033_.getDisplayName()));
 +                // Neo: Support sending additional arbitrary data to menu factories on the client-side
@@ -960,6 +965,12 @@
 +                                this.enderChestInventory.stopOpen(this);
 +                                // Paper end - Fix InventoryOpenEvent cancellation
 +                            }
++                            return OptionalInt.empty();
++                        }
++                        menuType = abstractcontainermenu.getType();
++                        if (menuType == null || net.minecraft.core.registries.BuiltInRegistries.MENU.getId(menuType) < 0) {
++                            abstractcontainermenu.transferTo(this.containerMenu, this.getBukkitEntity());
++                            LOGGER.warn("Refusing to open an unregistered menu type {} for {} after InventoryOpenEvent", menuType, this.getScoreboardName());
 +                            return OptionalInt.empty();
 +                        }
 +
