@@ -20,6 +20,7 @@ import com.mohistmc.youer.feature.warps.WarpsCommands;
 import com.mohistmc.youer.feature.warps.WarpsConfig;
 import com.mohistmc.youer.feature.world.WorldManage;
 import com.mohistmc.youer.feature.world.commands.WorldsCommands;
+import com.mohistmc.youer.commands.LightFixCommand;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
