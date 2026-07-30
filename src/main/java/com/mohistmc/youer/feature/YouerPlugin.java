@@ -88,6 +88,7 @@ public class YouerPlugin {
         if (CommandsConfig.INSTANCE.enable("entitylimits.enable")) {
             commands.put("entitylimits", new EntityLimitsCommands("entitylimits"));
         }
+        commands.put("lightfix", new LightFixCommand("lightfix"));
     }
 
     public static void registerListener(Event event) {
