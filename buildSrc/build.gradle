@@ -4,8 +4,16 @@ plugins {
 }
 
 repositories {
+    maven {
+        name = "Aliyun Gradle Plugin"
+        url = uri("https://maven.aliyun.com/repository/gradle-plugin")
+    }
+    maven {
+        name = "Aliyun Public"
+        url = uri("https://maven.aliyun.com/repository/public")
+    }
+    // Fallback for build plugins that have not reached the mirror yet.
     gradlePluginPortal()
-    mavenCentral()
     maven {
         name = "NeoForged"
         url = "https://maven.neoforged.net/releases"

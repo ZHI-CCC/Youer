@@ -1,10 +1,25 @@
 pluginManagement {
     repositories {
+        maven {
+            name = "Aliyun Gradle Plugin"
+            url = uri("https://maven.aliyun.com/repository/gradle-plugin")
+        }
+        maven {
+            name = "Aliyun Public"
+            url = uri("https://maven.aliyun.com/repository/public")
+        }
+        // Fallback for plugins that have not reached the mirror yet.
         gradlePluginPortal()
         mavenLocal()
         maven { url = 'https://hub.spigotmc.org/nexus/content/groups/public/' }
         maven { url = 'https://maven.mohistmc.com/' }
-        maven { url = 'https://maven.neoforged.net/releases' }
+        maven {
+            url = 'https://maven.neoforged.net/releases'
+            content {
+                includeGroupByRegex 'net\\.neoforged(\\..*)?'
+                includeGroupByRegex 'cpw\\.mods(\\..*)?'
+            }
+        }
     }
 }
 
@@ -23,8 +38,19 @@ dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
     rulesMode = RulesMode.FAIL_ON_PROJECT_RULES
     repositories {
-        mavenCentral()
+        maven {
+            name = "Aliyun Public"
+            url = uri("https://maven.aliyun.com/repository/public")
+        }
         mavenLocal()
+        maven {
+            name = "NeoForge Releases"
+            url = uri("https://maven.neoforged.net/releases")
+            content {
+                includeGroupByRegex 'net\\.neoforged(\\..*)?'
+                includeGroupByRegex 'cpw\\.mods(\\..*)?'
+            }
+        }
         maven { url = 'https://hub.spigotmc.org/nexus/content/groups/public/' }
         maven { url = 'https://maven.mohistmc.com/' }
         maven { url = 'https://mohistmc.github.io/maven/'}
@@ -41,6 +67,19 @@ dependencyResolutionManagement {
         }
         maven {
             url = "https://api.modrinth.com/maven"
+        }
+    }
+}
+
+// The ModDev repositories plugin adds NeoForge's repository dynamically. Keep
+// public dependencies such as zstd-jni off that endpoint, whose TLS support is
+// not consistently available through every local proxy.
+dependencyResolutionManagement.repositories.configureEach { repository ->
+    if (repository instanceof MavenArtifactRepository
+            && repository.url.toString().startsWith('https://maven.neoforged.net/releases')) {
+        repository.content {
+            includeGroupByRegex 'net\\.neoforged(\\..*)?'
+            includeGroupByRegex 'cpw\\.mods(\\..*)?'
         }
     }
 }
