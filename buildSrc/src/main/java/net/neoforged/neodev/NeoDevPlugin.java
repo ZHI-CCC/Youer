@@ -137,7 +137,7 @@ public class NeoDevPlugin implements Plugin<Project> {
 
         // 5. Unpack jar from 4.
         var mcSourcesPath = project.file("src/main/java");
-        tasks.register("setup", Sync.class, task -> {
+        var setup = tasks.register("setup", Sync.class, task -> {
             task.setGroup(GROUP);
             task.from(project.zipTree(applyPatches.flatMap(ApplyPatches::getPatchedJar)));
             task.into(mcSourcesPath);
@@ -207,6 +207,7 @@ public class NeoDevPlugin implements Plugin<Project> {
         // Generate source patches into a patch archive, based on the jar with injected interfaces.
         var genSourcePatches = tasks.register("generateSourcePatches", GenerateSourcePatches.class, task -> {
             task.setGroup(INTERNAL_GROUP);
+            task.dependsOn(setup);
             task.getOriginalJar().set(applyInterfaceInjection.flatMap(TransformSources::getOutputJar));
             task.getModifiedSources().set(project.file("src/main/java"));
             task.getPatchesJar().set(neoDevBuildDir.map(dir -> dir.file("source-patches.zip")));
@@ -215,6 +216,7 @@ public class NeoDevPlugin implements Plugin<Project> {
         // Generate source patches that are based on the production environment (without separate interface injection)
         var genProductionPatches = tasks.register("generateProductionSourcePatches", GenerateSourcePatches.class, task -> {
             task.setGroup(INTERNAL_GROUP);
+            task.dependsOn(setup);
             task.getOriginalJar().set(applyAt.flatMap(TransformSources::getOutputJar));
             task.getModifiedSources().set(project.file("src/main/java"));
             task.getPatchesFolder().set(neoDevBuildDir.map(dir -> dir.dir("production-source-patches")));
@@ -309,6 +311,7 @@ public class NeoDevPlugin implements Plugin<Project> {
             task.getMinecraftVersion().set(minecraftVersion);
             task.getNeoForgeVersion().set(neoForgeVersion);
             task.getMcAndNeoFormVersion().set(mcAndNeoFormVersion);
+            task.getIcon().set(project.getRootProject().file("src/main/resources/neoforged_logo.png"));
             // Anything that is on the launcher classpath should be downloaded by the installer.
             // (At least on the server side).
             task.addLibraries(configurations.launcherProfileClasspath);
@@ -472,6 +475,7 @@ public class NeoDevPlugin implements Plugin<Project> {
         project.getExtensions().getByType(JavaPluginExtension.class).withSourcesJar();
         var sourcesJarProvider = project.getTasks().named("sourcesJar", Jar.class);
         sourcesJarProvider.configure(task -> {
+            task.dependsOn(setup);
             task.exclude("net/minecraft/**");
             task.exclude("com/**");
             task.exclude("mcp/**");

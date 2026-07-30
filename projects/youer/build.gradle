@@ -22,12 +22,16 @@ gradleutils.setupSigning(project: project, signAllPublications: true)
 sourceSets {
     main {
         java {
-            srcDirs rootProject.file('src/main/java')
+            srcDirs rootProject.file('src/main/java'), project.file('src/main/java')
         }
         resources {
             srcDirs rootProject.file('src/main/resources'), rootProject.file('src/generated/resources')
         }
     }
+}
+
+tasks.named('compileJava') {
+    dependsOn tasks.named('setup')
 }
 
 final checkVersion = JCCPlugin.providePreviousVersion(

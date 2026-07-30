@@ -903,7 +903,7 @@
              if (abstractcontainermenu == null) {
                  if (this.isSpectator()) {
                      this.displayClientMessage(Component.translatable("container.spectatorCantOpen").withStyle(ChatFormatting.RED), true);
-@@ -1090,10 +_,68 @@
+@@ -1090,10 +_,79 @@
  
                  return OptionalInt.empty();
              } else {
