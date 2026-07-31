@@ -9,14 +9,8 @@ System.out.println("NeoForge version ${project.version}")
 
 // Youer start
 def gitInfo = gradleutils.gitInfo
-def originalProps = new Properties()
-file("gradle.properties").withInputStream { originalProps.load(it) }
-originalProps.setProperty("git.abbreviatedId",  gitInfo.abbreviatedId)
-file("gradle.properties").withWriter { writer ->
-    originalProps.store(writer, "Preserved original properties with Git info")
-    writer.write("\n")
-}
-System.out.println("Git Commit " + originalProps.getProperty("git.abbreviatedId"))
+ext.youerGitAbbreviatedId = gitInfo.abbreviatedId
+System.out.println("Git Commit " + gitInfo.abbreviatedId)
 //Youer end
 
 allprojects {

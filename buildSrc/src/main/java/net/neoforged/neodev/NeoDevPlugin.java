@@ -67,7 +67,11 @@ public class NeoDevPlugin implements Plugin<Project> {
         var extension = project.getExtensions().create(NeoDevExtension.NAME, NeoDevExtension.class);
         var configurations = NeoDevConfigurations.createAndSetup(project);
 
-        var abbreviatedId = project.getProviders().gradleProperty("git.abbreviatedId");
+        var abbreviatedId = project.getProviders().provider(() -> project.getRootProject()
+                .getExtensions()
+                .getExtraProperties()
+                .get("youerGitAbbreviatedId")
+                .toString());
 
         /*
          * MINECRAFT SOURCES SETUP
