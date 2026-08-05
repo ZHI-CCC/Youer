@@ -21,9 +21,11 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import net.minecraft.server.MinecraftServer;
 import net.neoforged.neoforge.internal.versions.neoforge.NeoForgeVersion;
@@ -72,6 +74,14 @@ public class YouerConfig {
     public static String keepinventory_exp_permission;
     // Thread Priority
     public static int server_thread;
+    // Async advancement loading (parses the player's advancement file off the main thread on login)
+    public static boolean async_advancement_loading;
+    // Async advancement saving (snapshots on the main thread, codec encode + Gson + file write on a worker)
+    public static boolean async_advancement_saving;
+    // Cache the WorldGenSettings NBT tag: its encode input (worldOptions + LEVEL_STEM registry) never
+    // changes while the server runs, yet every autosave re-encodes it once per dimension (main world
+    // and each dimension level.dat). Re-encoding dominated saveEverything in profiles of big modpacks.
+    public static boolean cache_worldgen_settings;
     public static boolean clear_item;
     public static List<String> clear_item_whitelist;
     public static String clear_item_msg;
@@ -85,7 +95,7 @@ public class YouerConfig {
     public static boolean ban_block_enable;
     public static boolean ban_entity_enable;
     public static boolean no_vanilla_entity_enable;
-    public static List<String> no_vanilla_entity_whitelist;
+    public static Set<String> no_vanilla_entity_whitelist;
     public static boolean ban_enchantment_enable;
     public static boolean ban_recipe_enable;
     public static boolean ban_world_enable;
@@ -134,7 +144,8 @@ public class YouerConfig {
     public static ModCompatibilityConfig terrablender_compat;
     public static ModCompatibilityConfig lithostitched_compat;
     public static boolean keepSpawnLoaded;
-    
+    public static boolean no_recipeBook;
+
     public static class ModCompatibilityConfig {
         public boolean enable;
         public List<String> skip_worlds;
@@ -272,6 +283,9 @@ public class YouerConfig {
         keepinventory_exp = getBoolean("keepinventory.global.exp", true);
         keepinventory_exp_permission = getString("keepinventory.permission.exp", "youer.keepinventory.exp");
         server_thread = getInt("threadpriority.server_thread", 5);
+        async_advancement_loading = getBoolean("youer.async_advancement_loading", true);
+        async_advancement_saving = getBoolean("youer.async_advancement_saving", true);
+        cache_worldgen_settings = getBoolean("youer.cache_worldgen_settings", true);
 
         clear_item = getBoolean("entity.clear.item.enable", false);
         clear_item_whitelist = getStringList("entity.clear.item.whitelist", new ArrayList<>());
@@ -287,7 +301,7 @@ public class YouerConfig {
         ban_block_enable = getBoolean("bans.block", false);
         ban_entity_enable = getBoolean("bans.entity.enable", false);
         no_vanilla_entity_enable = getBoolean("bans.entity.vanilla_entity.enable", false);
-        no_vanilla_entity_whitelist = getStringList("bans.entity.vanilla_entity.whitelist", new ArrayList<>());
+        no_vanilla_entity_whitelist = new HashSet<>(getStringList("bans.entity.vanilla_entity.whitelist", new ArrayList<>()));
         ban_enchantment_enable = getBoolean("bans.enchantment", false);
         ban_recipe_enable = getBoolean("bans.recipe", false);
         ban_world_enable = getBoolean("bans.world", false);
@@ -321,6 +335,7 @@ public class YouerConfig {
         custom_disabled_sign_commands = getBoolean("custom.disabled_signblock_commands", true);
         no_damage_particle = getBoolean("custom.no_damage_particle", false);
         keepSpawnLoaded = getBoolean("custom.keepSpawnLoaded", true);
+        no_recipeBook = getBoolean("custom.no_recipeBook", false);
 
         backup_world_enable = getBoolean("backup_world.enable", false);
         backup_world_interval = getInt("backup_world.interval", 3600);

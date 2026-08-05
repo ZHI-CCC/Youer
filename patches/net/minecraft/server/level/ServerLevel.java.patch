@@ -1,12 +1,13 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -1,7 +_,16 @@
+@@ -1,7 +_,17 @@
  package net.minecraft.server.level;
  
 +import com.destroystokyo.paper.event.entity.EntityAddToWorldEvent;
 +import com.destroystokyo.paper.event.entity.EntityRemoveFromWorldEvent;
  import com.google.common.annotations.VisibleForTesting;
  import com.google.common.collect.Lists;
++import com.mohistmc.youer.Youer;
 +import com.mohistmc.youer.YouerConfig;
 +import com.mohistmc.youer.api.event.block.PlayerMayInteractBlockEvent;
 +import com.mohistmc.youer.feature.ban.bans.BanEntity;
@@ -227,7 +228,7 @@
      public ServerLevel(
          MinecraftServer p_214999_,
          Executor p_215000_,
-@@ -230,11 +_,72 @@
+@@ -230,11 +_,75 @@
              p_215007_,
              p_214999_.getMaxChainedNeighborUpdates()
          );
@@ -260,7 +261,10 @@
 +        if (p_215002_ instanceof PrimaryLevelData) {
 +            this.K = (PrimaryLevelData) p_215002_;
 +        } else {
-+            this.K = YouerDerivedWorldInfo.create(p_215002_);
++            // Youer - per-dimension game rules: the independent copy lives on the level data
++            // (created in MinecraftServer.createLevels / DerivedLevelData), reuse it here so
++            // Paper's world config and Level.getGameRules() share the same instance
++            this.K = YouerDerivedWorldInfo.create(p_215002_, p_215002_.getGameRules());
 +        }
 +        this.spigotConfig = new SpigotWorldConfig(name); // Spigot
 +        paperWorldConfigCreator = spigotConfig -> p_214999_.paperConfigurations.createWorldConfig(
@@ -736,7 +740,7 @@
              if (p_8644_ != null) {
                  p_8644_.progressStartNoAbort(Component.translatable("menu.savingLevel"));
              }
-@@ -807,12 +_,30 @@
+@@ -807,12 +_,31 @@
              } else {
                  this.entityManager.autoSave();
              }
@@ -746,7 +750,8 @@
 +            if (worldserver1 != this.server.overworld()) {
 +                this.K.setWorldBorder(worldserver1.getWorldBorder().createSettings());
 +                this.K.setCustomBossEvents(this.server.getCustomBossEvents().save(this.registryAccess()));
-+                this.convertable.saveDataTag(this.server.registryAccess(), this.K, this.server.getPlayerList().getSingleplayerData());
++                // Youer - save the dimension's own level.dat into its folder (DIM-1, DIM1, dimensions/...) instead of overwriting the main world/level.dat
++                this.convertable.saveDimensionDataTag(this.server.registryAccess(), this.K, this.server.getPlayerList().getSingleplayerData(), worldserver1.dimension(), worldserver1.getGameRules());
 +            }
 +            // CraftBukkit end
 +
@@ -855,7 +860,7 @@
 -            return false;
 -        } else {
 -            return this.entityManager.addNewEntity(p_8873_);
-+            if (Boolean.parseBoolean("false")) LOGGER.warn("Tried to add entity {} but it was marked as removed already", EntityType.getKey(p_8873_.getType()));
++            if (Youer.DEBUG) LOGGER.warn("Tried to add entity {} but it was marked as removed already", EntityType.getKey(p_8873_.getType()));
 +            return false;
 +        } else {
 +            if (p_8873_ instanceof Villager && YouerConfig.custom_no_villager) return false;

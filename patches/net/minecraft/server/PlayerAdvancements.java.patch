@@ -1,6 +1,45 @@
 --- a/net/minecraft/server/PlayerAdvancements.java
 +++ b/net/minecraft/server/PlayerAdvancements.java
-@@ -44,11 +_,13 @@
+@@ -1,5 +_,6 @@
+ package net.minecraft.server;
+ 
++import com.google.common.util.concurrent.ThreadFactoryBuilder;
+ import com.google.gson.Gson;
+ import com.google.gson.GsonBuilder;
+ import com.google.gson.JsonElement;
+@@ -8,20 +_,31 @@
+ import com.google.gson.internal.Streams;
+ import com.google.gson.stream.JsonReader;
+ import com.mojang.datafixers.DataFixer;
++import com.mojang.datafixers.util.Pair;
+ import com.mojang.logging.LogUtils;
+ import com.mojang.serialization.Codec;
++import com.mojang.serialization.DataResult;
++import com.mojang.serialization.DynamicOps;
+ import com.mojang.serialization.JsonOps;
++import io.papermc.paper.util.concurrent.ScalingThreadPool;
++import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+ import java.io.IOException;
+ import java.io.Writer;
+ import java.nio.charset.StandardCharsets;
++import java.nio.file.AtomicMoveNotSupportedException;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
++import java.nio.file.StandardCopyOption;
+ import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.LinkedHashMap;
+ import java.util.Map;
+ import java.util.Set;
+ import java.util.Map.Entry;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
+ import java.util.function.BiConsumer;
+ import javax.annotation.Nullable;
+ import net.minecraft.FileUtil;
+@@ -44,13 +_,31 @@
  import net.minecraft.server.players.PlayerList;
  import net.minecraft.util.datafix.DataFixTypes;
  import net.minecraft.world.level.GameRules;
@@ -12,18 +51,215 @@
      private static final Logger LOGGER = LogUtils.getLogger();
 -    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 +    private static final Gson GSON = (new GsonBuilder()).create(); // Paper - Remove pretty printing from advancements
++    // Youer start - Async advancement loading/saving
++    // Dedicated scaling thread pool: parses the (potentially huge) advancement files and serializes
++    // saves off the main thread, so multiple players logging in or an autosave don't stall the
++    // server thread. The queue only accepts work when a worker is idle, so the pool can grow up to
++    // the max while stays at core size otherwise.
++    private static final ThreadPoolExecutor ASYNC_EXECUTOR = new ThreadPoolExecutor(
++        2,
++        Math.min(8, Runtime.getRuntime().availableProcessors()),
++        60L,
++        TimeUnit.SECONDS,
++        ScalingThreadPool.createUnboundedQueue(),
++        new ThreadFactoryBuilder().setNameFormat("Youer Advancement - %d").build(),
++        ScalingThreadPool.defaultReEnqueuePolicy()
++    );
++    // Youer end
      private final PlayerList playerList;
      private final Path playerSavePath;
++    private final ServerAdvancementManager advancementManager; // Youer - keep the manager for the async apply
      private AdvancementTree tree;
-@@ -129,6 +_,7 @@
+     private final Map<AdvancementHolder, AdvancementProgress> progress = new LinkedHashMap<>();
+     private final Set<AdvancementHolder> visible = new HashSet<>();
+@@ -61,15 +_,30 @@
+     private AdvancementHolder lastSelectedTab;
+     private boolean isFirstPacket = true;
+     private final Codec<PlayerAdvancements.Data> codec;
++    private final CompletableFuture<PlayerAdvancements.Data> pendingLoad; // Youer - async parse of the file
++    private boolean loaded; // Youer - guard against applying the parsed data twice
++    // Youer - chain of async saves for this player: each save runs after the previous one finished,
++    // so concurrent saves (autosave + disconnect) can never write the file out of order.
++    private CompletableFuture<Void> lastSave = CompletableFuture.completedFuture(null);
+ 
+     public PlayerAdvancements(DataFixer p_265655_, PlayerList p_265703_, ServerAdvancementManager p_265166_, Path p_265268_, ServerPlayer p_265673_) {
+         this.playerList = p_265703_;
+         this.playerSavePath = p_265268_;
+         this.player = p_265673_;
+         this.tree = p_265166_.tree();
++        this.advancementManager = p_265166_;
+         int i = 1343;
+         this.codec = DataFixTypes.ADVANCEMENTS.wrapCodec(PlayerAdvancements.Data.CODEC, p_265655_, 1343);
+-        this.load(p_265166_);
++        // Youer start - Async advancement loading: parse the file off the main thread, apply at the sync point (placeNewPlayer)
++        if (com.mohistmc.youer.YouerConfig.async_advancement_loading) {
++            this.pendingLoad = CompletableFuture.supplyAsync(this::parseFile, ASYNC_EXECUTOR);
++        } else {
++            // Sync fallback: keep the vanilla behaviour when the option is disabled
++            this.pendingLoad = CompletableFuture.completedFuture(null);
++            this.loaded = true;
++            this.load(this.advancementManager);
++        }
++        // Youer end
      }
  
-     public void save() {
-+        if (org.spigotmc.SpigotConfig.disableAdvancementSaving) return; // Spigot
-         JsonElement jsonelement = this.codec.encodeStart(JsonOps.INSTANCE, this.asData()).getOrThrow();
+     public void setPlayer(ServerPlayer p_135980_) {
+@@ -83,6 +_,7 @@
+     }
  
+     public void reload(ServerAdvancementManager p_135982_) {
++        this.ensureLoaded(); // Youer - wait for the pending async parse before resetting the state
+         this.stopListening();
+         this.progress.clear();
+         this.visible.clear();
+@@ -91,6 +_,7 @@
+         this.isFirstPacket = true;
+         this.lastSelectedTab = null;
+         this.tree = p_135982_.tree();
++        // Youer - reload is rare (datapack reload), so it re-parses synchronously
+         this.load(p_135982_);
+     }
+ 
+@@ -110,13 +_,20 @@
+         }
+     }
+ 
++    // Youer start - Async advancement loading
++    // Synchronous load, kept for reload and for FakePlayerAdvancements which overrides it to do nothing.
+     protected void load(ServerAdvancementManager p_136007_) {
++        this.applyLoadedData(p_136007_, this.parseFile());
++    }
++
++    // Runs on a worker thread: pure file + codec parsing, no shared state, no events.
++    // Returns null (and logs) when the file is missing or cannot be parsed, like the old sync load did.
++    private PlayerAdvancements.Data parseFile() {
+         if (Files.isRegularFile(this.playerSavePath)) {
+             try (JsonReader jsonreader = new JsonReader(Files.newBufferedReader(this.playerSavePath, StandardCharsets.UTF_8))) {
+                 jsonreader.setLenient(false);
+                 JsonElement jsonelement = Streams.parse(jsonreader);
+-                PlayerAdvancements.Data playeradvancements$data = this.codec.parse(JsonOps.INSTANCE, jsonelement).getOrThrow(JsonParseException::new);
+-                this.applyFrom(p_136007_, playeradvancements$data);
++                return this.codec.parse(JsonOps.INSTANCE, jsonelement).getOrThrow(JsonParseException::new);
+             } catch (JsonIOException | IOException ioexception) {
+                 LOGGER.error("Couldn't access player advancements in {}", this.playerSavePath, ioexception);
+             } catch (JsonParseException jsonparseexception) {
+@@ -124,28 +_,121 @@
+             }
+         }
+ 
++        return null;
++    }
++
++    // Applies the parsed data on the calling thread. Must only run on the main thread
++    // (it fires events, grants rewards and registers trigger listeners).
++    private void applyLoadedData(ServerAdvancementManager p_136007_, @Nullable PlayerAdvancements.Data p_301198_) {
++        if (p_301198_ != null) {
++            this.applyFrom(p_136007_, p_301198_);
++        }
+         this.checkForAutomaticTriggers(p_136007_);
+         this.registerListeners(p_136007_);
+     }
+ 
++    /**
++     * Waits for the asynchronous advancement parse and applies the data on the calling thread.
++     * The parse itself runs on a worker thread and never depends on the main thread, so this
++     * cannot deadlock; under normal login flow the parse finishes while the client is still in
++     * the configuration phase and this returns immediately.
++     */
++    public void ensureLoaded() {
++        if (this.loaded) {
++            return;
++        }
++        this.loaded = true;
++        PlayerAdvancements.Data data = null;
++        try {
++            data = this.pendingLoad.get();
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            LOGGER.error("Interrupted while loading player advancements in {}", this.playerSavePath, e);
++        } catch (ExecutionException e) {
++            LOGGER.error("Failed to load player advancements in {}", this.playerSavePath, e);
++        }
++        this.applyLoadedData(this.advancementManager, data);
++    }
++    // Youer end
++
+     public void save() {
+-        JsonElement jsonelement = this.codec.encodeStart(JsonOps.INSTANCE, this.asData()).getOrThrow();
+-
++        if (org.spigotmc.SpigotConfig.disableAdvancementSaving) return; // Spigot
++        this.ensureLoaded(); // Youer - never overwrite the file with data that hasn't been loaded yet
++        if (com.mohistmc.youer.YouerConfig.async_advancement_saving) {
++            // Youer start - Async advancement saving
++            // Snapshot on the main thread: an O(n) deep copy, orders of magnitude cheaper than the
++            // codec encode + Gson serialization that used to run here (the vanilla save() showed up
++            // as ~15% of the server thread in autosave profiles). The worker thread then encodes and
++            // writes the snapshot; it never touches live progress, which the main thread keeps
++            // mutating via award/revoke. Saves are chained per player so the file is always written
++            // in submission order.
++            PlayerAdvancements.Data snapshot = this.asData();
++            CompletableFuture<Void> pending = this.lastSave.thenRunAsync(() -> this.writeSnapshot(snapshot), ASYNC_EXECUTOR)
++                .handle((p_135976_, p_135977_) -> {
++                    if (p_135977_ != null) {
++                        LOGGER.error("Couldn't save player advancements to {}", this.playerSavePath, p_135977_);
++                    }
++                    return null;
++                });
++            this.lastSave = pending;
++            // Youer end
++        } else {
++            // Sync fallback: keep the vanilla behaviour when the option is disabled
++            JsonElement jsonelement = this.codec.encodeStart(JsonOps.INSTANCE, this.asData()).getOrThrow();
++            this.writeJson(jsonelement);
++        }
++    }
++
++    // Youer start - Async advancement saving
++    // Blocks until the last submitted save has hit disk. Used on the player disconnect path and by
++    // PlayerList.saveAll on the calling (autosave) thread, never on the tick path.
++    public void flushSave() {
++        try {
++            this.lastSave.join();
++        } catch (java.util.concurrent.CompletionException e) {
++            // Already logged by the handle() above; the file will be rewritten by the next save.
++        }
++    }
++
++    // Runs on a worker thread: codec encode + Gson serialization + atomic file replace. Errors are
++    // propagated to the future chain (logged there), except IO failures which are logged here.
++    private void writeSnapshot(PlayerAdvancements.Data snapshot) {
++        JsonElement jsonelement = this.codec.encodeStart(JsonOps.INSTANCE, snapshot).getOrThrow();
++        this.writeJson(jsonelement);
++    }
++
++    private void writeJson(JsonElement jsonelement) {
++        Path tmp = this.playerSavePath.resolveSibling(this.playerSavePath.getFileName() + ".tmp");
          try {
-@@ -146,6 +_,8 @@
+             FileUtil.createDirectoriesSafe(this.playerSavePath.getParent());
+ 
+-            try (Writer writer = Files.newBufferedWriter(this.playerSavePath, StandardCharsets.UTF_8)) {
++            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                 GSON.toJson(jsonelement, GSON.newJsonWriter(writer));
+             }
++
++            // Replace atomically: with async saves the server can crash between the encode and the
++            // write, so a torn target file must never be left behind.
++            try {
++                Files.move(tmp, this.playerSavePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
++            } catch (AtomicMoveNotSupportedException atomicmovenotsupportedexception) {
++                Files.move(tmp, this.playerSavePath, StandardCopyOption.REPLACE_EXISTING);
++            }
+         } catch (JsonIOException | IOException ioexception) {
+             LOGGER.error("Couldn't save player advancements to {}", this.playerSavePath, ioexception);
++            try {
++                Files.deleteIfExists(tmp);
++            } catch (IOException ignored) {
++            }
+         }
+     }
++    // Youer end
+ 
+     private void applyFrom(ServerAdvancementManager p_301166_, PlayerAdvancements.Data p_301198_) {
          p_301198_.forEach((p_300732_, p_300733_) -> {
              AdvancementHolder advancementholder = p_301166_.get(p_300732_);
              if (advancementholder == null) {
@@ -32,6 +268,17 @@
                  LOGGER.warn("Ignored advancement '{}' in progress file {} - it doesn't exist anymore?", p_300732_, this.playerSavePath);
              } else {
                  this.startProgress(advancementholder, p_300733_);
+@@ -159,7 +_,9 @@
+         Map<ResourceLocation, AdvancementProgress> map = new LinkedHashMap<>();
+         this.progress.forEach((p_300724_, p_300725_) -> {
+             if (p_300725_.hasProgress()) {
+-                map.put(p_300724_.id(), p_300725_);
++                // Youer - deep copy: the worker thread encodes this snapshot while the main thread
++                // keeps mutating the live progress, so no mutable state may be shared with it
++                map.put(p_300724_.id(), p_300725_.snapshot());
+             }
+         });
+         return new PlayerAdvancements.Data(map);
 @@ -170,15 +_,34 @@
          AdvancementProgress advancementprogress = this.getOrStartProgress(p_300979_);
          boolean flag1 = advancementprogress.isDone();
@@ -77,3 +324,50 @@
          }
  
          if (flag1 && !advancementprogress.isDone()) {
+@@ -318,8 +_,45 @@
+         );
+     }
+ 
++    // Youer start - Fast advancement map codec
++    // The vanilla unboundedMap codec collects into an Object2ObjectArrayMap whose putIfAbsent does a
++    // linear scan, i.e. O(n^2) total. For large advancement files (big modpacks can easily have tens of
++    // thousands of entries) that dominated login time. Decode into an open hash map with a pre-allocated
++    // capacity instead; encoding keeps using the vanilla codec (no performance requirement there).
++    private static final Codec<Map<ResourceLocation, AdvancementProgress>> UNBOUNDED_MAP_CODEC = Codec.unboundedMap(ResourceLocation.CODEC, AdvancementProgress.CODEC);
++    private static final Codec<Map<ResourceLocation, AdvancementProgress>> FAST_MAP_CODEC = new Codec<>() {
++        @Override
++        public <T> DataResult<Pair<Map<ResourceLocation, AdvancementProgress>, T>> decode(DynamicOps<T> ops, T input) {
++            return ops.getMapValues(input).flatMap(stream -> {
++                java.util.List<Pair<T, T>> list = stream.collect(java.util.stream.Collectors.toList());
++                Object2ObjectOpenHashMap<ResourceLocation, AdvancementProgress> map = new Object2ObjectOpenHashMap<>(Math.max(16, list.size() + 1));
++                for (Pair<T, T> entry : list) {
++                    DataResult<ResourceLocation> keyResult = ResourceLocation.CODEC.parse(ops, entry.getFirst());
++                    if (keyResult.error().isPresent()) {
++                        return DataResult.error(() -> "Failed to parse advancement id: " + keyResult.error().get().message());
++                    }
++                    DataResult<AdvancementProgress> valueResult = AdvancementProgress.CODEC.parse(ops, entry.getSecond());
++                    if (valueResult.error().isPresent()) {
++                        return DataResult.error(() -> "Failed to parse advancement progress for '" + keyResult.getOrThrow() + "': " + valueResult.error().get().message());
++                    }
++                    ResourceLocation key = keyResult.getOrThrow();
++                    if (map.putIfAbsent(key, valueResult.getOrThrow()) != null) {
++                        return DataResult.error(() -> "Duplicate advancement id: " + key);
++                    }
++                }
++                return DataResult.success(Pair.of(map, ops.empty()));
++            });
++        }
++
++        @Override
++        public <T> DataResult<T> encode(Map<ResourceLocation, AdvancementProgress> map, DynamicOps<T> ops, T prefix) {
++            return UNBOUNDED_MAP_CODEC.encode(map, ops, prefix);
++        }
++    };
++    // Youer end
++
+     static record Data(Map<ResourceLocation, AdvancementProgress> map) {
+-        public static final Codec<PlayerAdvancements.Data> CODEC = Codec.unboundedMap(ResourceLocation.CODEC, AdvancementProgress.CODEC)
++        public static final Codec<PlayerAdvancements.Data> CODEC = FAST_MAP_CODEC
+             .xmap(PlayerAdvancements.Data::new, PlayerAdvancements.Data::map);
+ 
+         public void forEach(BiConsumer<ResourceLocation, AdvancementProgress> p_300973_) {
